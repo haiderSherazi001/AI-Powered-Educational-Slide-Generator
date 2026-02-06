@@ -1,20 +1,23 @@
-<?php
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Slide Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen">
 
-use Illuminate\Foundation\Application;
-use Illuminate\Http\Request;
+    <div class="text-center">
+        <h1 class="text-4xl font-bold mb-4">AI Slide Generator 🚀</h1>
+        <p class="text-gray-400">Frontend Team: Start building your UI here!</p>
 
-define('LARAVEL_START', microtime(true));
+        <button id="generate-btn" class="mt-6 px-6 py-3 bg-blue-600 rounded hover:bg-blue-500">
+            Generate Slides
+        </button>
+    </div>
 
-// Determine if the application is in maintenance mode...
-if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
-    require $maintenance;
-}
-
-// Register the Composer autoloader...
-require __DIR__.'/../vendor/autoload.php';
-
-// Bootstrap Laravel and handle the request...
-/** @var Application $app */
-$app = require_once __DIR__.'/../bootstrap/app.php';
-
-$app->handleRequest(Request::capture());
+    <script src="js/app.js"></script>
+</body>
+</html>
