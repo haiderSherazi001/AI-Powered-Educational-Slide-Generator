@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Powered Educational Slide Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/theme/dracula.min.css"
+        id="theme">
+
+    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex flex-col items-center py-10">
+
+    <header class="mb-10 text-center">
+        <h1 class="text-4xl font-bold text-blue-600 mb-2">AI Slide Generator</h1>
+        <p class="text-gray-600">Create educational slides in seconds using AI</p>
+    </header>
+
+    <main class="w-full max-w-4xl px-4">
+
+        <section id="input-section" class="bg-white p-8 rounded-xl shadow-md mb-8">
+            <h2 class="text-xl font-semibold mb-4">Generate Your Slides</h2>
+
+            <form id="slide-form" class="space-y-4">
+
+                <div>
+                    <label for="topic" class="block text-sm font-medium text-gray-700 mb-1">Topic or Subject</label>
+                    <input type="text" id="topic" name="topic" placeholder="e.g., Photosynthesis, History of Rome"
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition">
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <hr class="w-full border-gray-300">
+                    <span class="px-3 text-gray-500 text-sm font-bold">OR</span>
+                    <hr class="w-full border-gray-300">
+                </div>
+
+                <div>
+                    <label for="fileInput" class="block text-sm font-medium text-gray-700 mb-1">Upload PDF or Image
+                        (Optional)</label>
+                    <input type="file" id="fileInput" name="file" accept=".pdf,.jpg,.png,.jpeg,.epub"
+                        class="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label for="slide-count" class="block text-sm font-medium text-gray-700 mb-1">Number of
+                        Slides</label>
+                    <input type="number" id="slide-count" min="3" max="15" value="7"
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition">
+                </div>
+
+                <button type="submit" id="generateBtn"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-300 shadow-lg transform hover:scale-105">
+                    ✨ Generate Slides with AI
+                </button>
+            </form>
+        </section>
+
+        <section id="loading-spinner" class="hidden flex flex-col items-center justify-center p-12">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600"></div>
+            <p class="mt-4 text-gray-600 font-medium text-lg">AI is reading your data & crafting slides...</p>
+        </section>
+
+        <section id="slide-container" class="hidden space-y-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Your Presentation</h2>
+
+                <div class="flex gap-2">
+                    <button onclick="window.location.reload()"
+                        class="text-gray-600 hover:text-gray-900 font-medium px-4">
+                        New
+                    </button>
+                    <button id="downloadPptxBtn"
+                        class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition flex items-center gap-2">
+                        📥 Download .pptx
+                    </button>
+                </div>
+            </div>
+
+            <div class="reveal-viewport bg-black rounded-xl shadow-2xl overflow-hidden" style="height: 500px;">
+                <div class="reveal">
+                    <div class="slides" id="slides-output">
+                    </div>
+                </div>
+            </div>
+
+            <p class="text-center text-gray-500 text-sm mt-2">Use Arrow Keys ⬅️ ➡️ to navigate slides</p>
+        </section>
+
+    </main>
+
+    <footer class="mt-auto py-6 text-gray-500 text-sm text-center">
+        &copy; 2026 OurAI
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
+
+    <script>
+        const form = document.getElementById('slide-form');
+        const generateBtn = document.getElementById('generateBtn');
+        const loadingSection = document.getElementById('loading-spinner');
+        const slideContainer = document.getElementById('slide-container');
+        const inputSection = document.getElementById('input-section');
+        const slidesOutput = document.getElementById('slides-output');
+        const downloadBtn = document.getElementById('downloadPptxBtn');
+
+        let currentSlideData = null;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const topic = document.getElementById('topic').value;
+            const file = document.getElementById('fileInput').files[0];
+            const count = document.getElementById('slide-count').value;
+
+            if (!topic && !file) {
+                alert("Please enter a Topic OR Upload a File!");
+                return;
+            }
+
+            inputSection.classList.add('hidden');
+            loadingSection.classList.remove('hidden');
+
+            const formData = new FormData();
+            let finalTopic = topic + " (Detailed, 5-7 bullet points per slide)";
+            if (count) finalTopic += ` (Create exactly ${count} slides)`;
+
+            if (file) {
+                formData.append('file', file);
+            } else {
+                formData.append('topic', finalTopic);
+            }
+
+            try {
+                const response = await fetch('/api/generate-slides', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error || "Generation failed");
+
+                currentSlideData = data;
+                renderRevealSlides(data);
+
+                loadingSection.classList.add('hidden');
+                slideContainer.classList.remove('hidden');
+
+                Reveal.initialize({
+                    embedded: true,
+                    history: false,
+                    mouseWheel: true,
+                    transition: 'convex',
+                    backgroundTransition: 'zoom'
+                });
+
+            } catch (error) {
+                alert("Error: " + error.message);
+                loadingSection.classList.add('hidden');
+                inputSection.classList.remove('hidden');
+            }
+        });
+
+        function renderRevealSlides(data) {
+            let html = '';
+
+            // 1. Title Slide
+            html += `
+                <section data-background-gradient="linear-gradient(to bottom right, #0f2027, #203a43, #2c5364)">
+                    <div style="display: flex; flex-direction: column; justify-content: center; height: 100%;">
+                        <h1 style="font-size: 2.5em; margin-bottom: 20px; color: white;">${data.presentation_title || "Generated Presentation"}</h1>
+                        <p style="color: #4facfe; font-size: 1.2em;">Created by OurAI</p>
+                    </div>
+                </section>
+            `;
+
+            // 2. Content Slides
+            if (data.slides && Array.isArray(data.slides)) {
+                data.slides.forEach(slide => {
+                    html += `
+                        <section data-background-color="#1a1a1a">
+                            <div style="width: 100%; padding: 20px; box-sizing: border-box;">
+                                
+                                <h5 style="color: #4facfe; text-align: left; font-size: 1.5em; margin-bottom: 30px; border-bottom: 1px solid #555; padding-bottom: 10px;">
+                                    ${slide.title}
+                                </h5>
+                                
+                                <div style="text-align: left;">
+                                    <ul style="font-size: 32px; line-height: 1.6; color: #e0e0e0; margin-left: 40px;">
+                                        ${slide.bullet_points.map(pt => `<li class="fragment" style="margin-bottom: 20px;">${pt}</li>`).join('')}
+                                    </ul>
+                                </div>
+
+                            </div>
+                        </section>
+                    `;
+                });
+            }
+            slidesOutput.innerHTML = html;
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            if (!currentSlideData) {
+                alert("No slides to download!");
+                return;
+            }
+
+            let pres = new PptxGenJS();
+            pres.layout = 'LAYOUT_16x9';
+            pres.title = currentSlideData.presentation_title;
+
+            pres.defineSlideMaster({
+                title: 'MASTER_SLIDE',
+                background: { color: "0F172A" },
+                objects: [
+                    { rect: { x: 0, y: 0, w: 0.3, h: 7.5, fill: { color: "F59E0B" } } },
+                    { rect: { x: 0.3, y: 7.0, w: '100%', h: 0.5, fill: { color: "1E293B" } } },
+                    { text: { text: "{slide_number}", options: { x: 12.5, y: 7.1, w: 0.5, h: 0.3, align: "center", color: "FFFFFF", fontSize: 10 } } },
+                    { text: { text: new Date().toLocaleDateString(), options: { x: 0.5, y: 7.1, w: 2, h: 0.3, color: "94A3B8", fontSize: 10 } } }
+                ]
+            });
+
+            let slide1 = pres.addSlide();
+            slide1.background = { color: "0F172A" };
+            slide1.addShape(pres.ShapeType.ellipse, { x: 8, y: 0, w: 6, h: 6, fill: { color: "1E293B" } });
+
+            slide1.addText(currentSlideData.presentation_title, {
+                x: 1, y: 2.5, w: '80%', h: 2,
+                fontSize: 44, color: "FFFFFF", bold: true, fontFace: "Arial"
+            });
+            slide1.addText("GENERATED BY OurAI", {
+                x: 1, y: 4.5, w: '80%', h: 0.5,
+                fontSize: 14, color: "F59E0B", bold: true, letterSpacing: 2
+            });
+
+            currentSlideData.slides.forEach(slideInfo => {
+                let slide = pres.addSlide({ masterName: 'MASTER_SLIDE' });
+
+                slide.addText(slideInfo.title, {
+                    x: 0.8, y: 0.5, w: '90%', h: 1,
+                    fontSize: 28, color: "F59E0B", bold: true, fontFace: "Arial"
+                });
+
+                let bulletItems = slideInfo.bullet_points.map(pt => {
+                    return {
+                        text: pt,
+                        options: {
+                            fontSize: 16,
+                            color: "E2E8F0",
+                            bullet: { code: "2022", color: "F59E0B" },
+                            breakLine: true,
+                            paraSpaceBefore: 10
+                        }
+                    };
+                });
+
+                slide.addText(bulletItems, {
+                    x: 0.8, y: 1.5, w: '85%', h: 5.2,
+                    align: "left", valign: "top",
+                    lineSpacing: 28
+                });
+
+                slide.addText("Visual Idea: " + slideInfo.image_keyword, {
+                    x: 3, y: 7.1, w: 6, h: 0.3,
+                    fontSize: 9, color: "64748B", italic: true, align: "center"
+                });
+            });
+
+            pres.writeFile({ fileName: "AI-Professional-Deck.pptx" });
+        });
+    </script>
+
+</body>
+
+</html>

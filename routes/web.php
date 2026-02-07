@@ -3,5 +3,5 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return file_get_contents(public_path('/html/index.html'));
+    return file_get_contents(public_path('/main_project/index.html'));
 });
