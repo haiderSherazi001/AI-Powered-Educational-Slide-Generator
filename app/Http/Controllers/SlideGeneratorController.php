@@ -11,29 +11,52 @@ class SlideGeneratorController extends Controller
 {
     public function generate(Request $request)
     {
-        // 1. UPDATED VALIDATION: Now allows Images
+        // 1. VALIDATION: Allow PDF, Images, and EPUB
         $request->validate([
             'topic' => 'nullable|string',
-            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,webp|max:10240', // 10MB Max
+            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,webp,epub,zip|max:10240', // 10MB
         ]);
 
         $promptContext = "";
-        $imagePart = null; // We will fill this if it's an image
+        $imagePart = null;
 
         try {
-            // CASE A: User uploaded a file
+            // ==========================================
+            // CASE A: USER UPLOADED A FILE
+            // ==========================================
             if ($request->hasFile('file')) {
                 $file = $request->file('file');
                 $mimeType = $file->getMimeType();
+                $originalName = $file->getClientOriginalName();
 
-                // If it is a PDF -> Extract Text (Old Logic)
+                // 1. PDF Handler
                 if ($mimeType === 'application/pdf') {
                     $pdfParser = new Parser();
                     $pdf = $pdfParser->parseFile($file->getPathname());
                     $text = $pdf->getText();
-                    $promptContext = "Analyze this document content: " . substr($text, 0, 15000);
+                    $promptContext = "Analyze this document content: " . substr($text, 0, 30000);
                 } 
-                // If it is an IMAGE -> Prepare for Gemini Vision (New Logic)
+                // 2. EPUB Handler (Safe Version)
+                elseif ($mimeType === 'application/epub+zip' || str_ends_with($originalName, '.epub')) {
+                    if (!class_exists('ZipArchive')) {
+                        return response()->json(['error' => 'Server Error: Zip extension missing in php.ini'], 500);
+                    }
+                    
+                    $zip = new \ZipArchive();
+                    $text = "";
+                    if ($zip->open($file->getPathname()) === TRUE) {
+                        for ($i = 0; $i < $zip->numFiles; $i++) {
+                            $filename = $zip->getNameIndex($i);
+                            if (preg_match('/\.(xhtml|html|htm)$/i', $filename)) {
+                                $text .= strip_tags($zip->getFromIndex($i)) . " ";
+                            }
+                            if (strlen($text) > 50000) break; 
+                        }
+                        $zip->close();
+                    }
+                    $promptContext = "Analyze this eBook content: " . substr($text, 0, 30000);
+                }
+                // 3. Image Handler
                 else {
                     $imageData = base64_encode(file_get_contents($file->getPathname()));
                     $imagePart = [
@@ -42,17 +65,20 @@ class SlideGeneratorController extends Controller
                             'data' => $imageData
                         ]
                     ];
-                    $promptContext = "Analyze this image. It is educational material. Extract the key topics and create slides.";
+                    $promptContext = "Analyze this image. It is educational material. Extract key topics.";
                 }
             } 
-            // CASE B: User typed a topic
+            // ==========================================
+            // CASE B: USER TYPED A TOPIC
+            // ==========================================
             elseif ($request->input('topic')) {
-                $promptContext = "Create a presentation about: " . $request->input('topic');
+                // This logic was likely unreachable in your previous file
+                $promptContext = "Create a detailed presentation about: " . $request->input('topic');
             } else {
                 return response()->json(['error' => 'Please upload a file or enter a topic.'], 400);
             }
 
-            // 2. Call Gemini (Now with Image support)
+            // 2. Call Gemini
             $slideData = $this->askGemini($promptContext, $imagePart);
 
             return response()->json($slideData);
@@ -67,36 +93,35 @@ class SlideGeneratorController extends Controller
     {
         $apiKey = env('GEMINI_API_KEY');
         
-        // Base instructions for JSON format
         $systemInstruction = "
             You are an expert presentation creator. 
-            Analyze the input (text or image) and generate a 12-slide presentation structure.
-            RETURN ONLY VALID JSON. No Markdown.
-            Structure: { \"presentation_title\": \"...\", \"slides\": [ { \"slide_number\": 1, \"title\": \"...\", \"bullet_points\": [\"...\"], \"image_keyword\": \"...\" } ] }
+            Analyze the input and generate a presentation structure.
+            
+            CRITICAL RULES:
+            1. Generate exactly 10 slides.
+            2. EACH slide MUST have 3-4 bullet points.
+            3. RETURN ONLY RAW JSON. DO NOT use Markdown formatting (no ```json ... ```).
+            4. Do not add introductory text. Start with { and end with }.
+            
+            Structure: { \"presentation_title\": \"...\", \"slides\": [ { \"slide_number\": 1, \"title\": \"...\", \"bullet_points\": [\"...\", \"...\", \"...\", \"...\"], \"image_keyword\": \"...\" } ] }
         ";
 
-        // Construct the API Payload
-        $contents = [];
-        
-        // 1. Add the text instructions
         $parts = [
             ['text' => $systemInstruction . "\n\n INPUT CONTEXT: " . $textPrompt]
         ];
 
-        // 2. Add the Image (if it exists)
         if ($imagePart) {
             $parts[] = $imagePart;
         }
 
         $response = Http::withHeaders([
             'Content-Type' => 'application/json',
-        ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={$apiKey}", [
+        ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}", [
             'contents' => [
                 ['parts' => $parts]
             ]
         ]);
 
-        // 3. Parse Response
         $responseData = $response->json();
 
         if (isset($responseData['error'])) {
@@ -104,10 +129,39 @@ class SlideGeneratorController extends Controller
         }
 
         $rawText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
-        
-        // Clean markdown
+
         $cleanJson = str_replace(['```json', '```'], '', $rawText);
         
-        return json_decode($cleanJson, true);
+        $startIndex = strpos($cleanJson, '{');
+        $endIndex = strrpos($cleanJson, '}');
+
+        if ($startIndex !== false && $endIndex !== false) {
+            $cleanJson = substr($cleanJson, $startIndex, ($endIndex - $startIndex) + 1);
+        }
+
+        $jsonData = json_decode($cleanJson, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error("JSON Decode Error: " . json_last_error_msg());
+            Log::error("Raw AI Output: " . $rawText);
+            
+            return [
+                "presentation_title" => "Error Parsing Slides",
+                "slides" => [
+                    [
+                        "slide_number" => 1,
+                        "title" => "Generation Failed",
+                        "bullet_points" => [
+                            "The AI generated invalid data.",
+                            "Please try again with a slightly different topic.",
+                            "Raw Error: " . json_last_error_msg()
+                        ],
+                        "image_keyword" => "error"
+                    ]
+                ]
+            ];
+        }
+        
+        return $jsonData;
     }
 }
