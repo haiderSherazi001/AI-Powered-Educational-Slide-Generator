@@ -93,17 +93,17 @@ class SlideGeneratorController extends Controller
     {
         $apiKey = env('GEMINI_API_KEY');
         
-        // Strict JSON Instructions
         $systemInstruction = "
             You are an expert presentation creator. 
             Analyze the input and generate a presentation structure.
             
             CRITICAL RULES:
-            1. Generate exactly 10 slides (unless instructed otherwise).
-            2. EACH slide MUST have 3-4 detailed bullet points.
-            3. RETURN ONLY VALID JSON. No Markdown.
+            1. Generate exactly 10 slides.
+            2. EACH slide MUST have 3-4 bullet points.
+            3. RETURN ONLY RAW JSON. DO NOT use Markdown formatting (no ```json ... ```).
+            4. Do not add introductory text. Start with { and end with }.
             
-            Structure: { \"presentation_title\": \"...\", \"slides\": [ { \"slide_number\": 1, \"title\": \"...\", \"bullet_points\": [\"...\", \"...\", \"...\", \"...\", \"...\"], \"image_keyword\": \"...\" } ] }
+            Structure: { \"presentation_title\": \"...\", \"slides\": [ { \"slide_number\": 1, \"title\": \"...\", \"bullet_points\": [\"...\", \"...\", \"...\", \"...\"], \"image_keyword\": \"...\" } ] }
         ";
 
         $parts = [
@@ -114,7 +114,6 @@ class SlideGeneratorController extends Controller
             $parts[] = $imagePart;
         }
 
-        // Using Gemini 1.5 Flash (Most reliable)
         $response = Http::withHeaders([
             'Content-Type' => 'application/json',
         ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}", [
@@ -130,8 +129,39 @@ class SlideGeneratorController extends Controller
         }
 
         $rawText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
+
         $cleanJson = str_replace(['```json', '```'], '', $rawText);
         
-        return json_decode($cleanJson, true);
+        $startIndex = strpos($cleanJson, '{');
+        $endIndex = strrpos($cleanJson, '}');
+
+        if ($startIndex !== false && $endIndex !== false) {
+            $cleanJson = substr($cleanJson, $startIndex, ($endIndex - $startIndex) + 1);
+        }
+
+        $jsonData = json_decode($cleanJson, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error("JSON Decode Error: " . json_last_error_msg());
+            Log::error("Raw AI Output: " . $rawText);
+            
+            return [
+                "presentation_title" => "Error Parsing Slides",
+                "slides" => [
+                    [
+                        "slide_number" => 1,
+                        "title" => "Generation Failed",
+                        "bullet_points" => [
+                            "The AI generated invalid data.",
+                            "Please try again with a slightly different topic.",
+                            "Raw Error: " . json_last_error_msg()
+                        ],
+                        "image_keyword" => "error"
+                    ]
+                ]
+            ];
+        }
+        
+        return $jsonData;
     }
 }
