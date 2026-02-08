@@ -30,7 +30,7 @@
 
                 <div>
                     <label for="topic" class="block text-sm font-medium text-gray-700 mb-1">Topic or Subject</label>
-                    <input type="text" id="topic" name="topic" placeholder="e.g., Photosynthesis, History of Rome"
+                    <input type="text" id="topic" name="topic" placeholder="e.g. Programming in C++"
                         class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition">
                 </div>
 
@@ -127,7 +127,7 @@
             loadingSection.classList.remove('hidden');
 
             const formData = new FormData();
-            let finalTopic = topic + " (Detailed, 5-7 bullet points per slide)";
+            let finalTopic = topic + " (Detailed, 3-4 bullet points per slide)";
             if (count) finalTopic += ` (Create exactly ${count} slides)`;
 
             if (file) {
