@@ -11,14 +11,13 @@ class SlideGeneratorController extends Controller
 {
     public function generate(Request $request)
     {
-        // 1. VALIDATION: Allow PDF, Images, and EPUB
+        // 1. VALIDATION
         $request->validate([
             'topic' => 'nullable|string',
-            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,webp,epub,zip|max:10240', // 10MB
+            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png,webp,epub,zip|max:10240',
         ]);
 
         $promptContext = "";
-        $imagePart = null;
 
         try {
             // ==========================================
@@ -34,14 +33,13 @@ class SlideGeneratorController extends Controller
                     $pdfParser = new Parser();
                     $pdf = $pdfParser->parseFile($file->getPathname());
                     $text = $pdf->getText();
-                    $promptContext = "Analyze this document content: " . substr($text, 0, 30000);
+                    $promptContext = "Analyze this document content: " . substr($text, 0, 15000);
                 } 
-                // 2. EPUB Handler (Safe Version)
+                // 2. EPUB Handler
                 elseif ($mimeType === 'application/epub+zip' || str_ends_with($originalName, '.epub')) {
                     if (!class_exists('ZipArchive')) {
-                        return response()->json(['error' => 'Server Error: Zip extension missing in php.ini'], 500);
+                        return response()->json(['error' => 'Server Error: Zip extension missing'], 500);
                     }
-                    
                     $zip = new \ZipArchive();
                     $text = "";
                     if ($zip->open($file->getPathname()) === TRUE) {
@@ -50,36 +48,28 @@ class SlideGeneratorController extends Controller
                             if (preg_match('/\.(xhtml|html|htm)$/i', $filename)) {
                                 $text .= strip_tags($zip->getFromIndex($i)) . " ";
                             }
-                            if (strlen($text) > 50000) break; 
+                            if (strlen($text) > 20000) break; 
                         }
                         $zip->close();
                     }
-                    $promptContext = "Analyze this eBook content: " . substr($text, 0, 30000);
+                    $promptContext = "Analyze this eBook content: " . substr($text, 0, 15000);
                 }
-                // 3. Image Handler
+                // 3. Image Handler (Groq is Text-Only, so we use a fallback)
                 else {
-                    $imageData = base64_encode(file_get_contents($file->getPathname()));
-                    $imagePart = [
-                        'inline_data' => [
-                            'mime_type' => $mimeType,
-                            'data' => $imageData
-                        ]
-                    ];
-                    $promptContext = "Analyze this image. It is educational material. Extract key topics.";
+                    $promptContext = "Create a presentation about this educational image's likely topic.";
                 }
             } 
             // ==========================================
             // CASE B: USER TYPED A TOPIC
             // ==========================================
             elseif ($request->input('topic')) {
-                // This logic was likely unreachable in your previous file
                 $promptContext = "Create a detailed presentation about: " . $request->input('topic');
             } else {
                 return response()->json(['error' => 'Please upload a file or enter a topic.'], 400);
             }
 
-            // 2. Call Gemini
-            $slideData = $this->askGemini($promptContext, $imagePart);
+            // 2. Call Groq
+            $slideData = $this->askGroq($promptContext);
 
             return response()->json($slideData);
 
@@ -89,9 +79,9 @@ class SlideGeneratorController extends Controller
         }
     }
 
-    private function askGemini($textPrompt, $imagePart = null)
+    private function askGroq($textPrompt)
     {
-        $apiKey = env('GEMINI_API_KEY');
+        $apiKey = env('GROQ_API_KEY');
         
         $systemInstruction = "
             You are an expert presentation creator. 
@@ -106,41 +96,35 @@ class SlideGeneratorController extends Controller
             Structure: { \"presentation_title\": \"...\", \"slides\": [ { \"slide_number\": 1, \"title\": \"...\", \"bullet_points\": [\"...\", \"...\", \"...\", \"...\"], \"image_keyword\": \"...\" } ] }
         ";
 
-        $parts = [
-            ['text' => $systemInstruction . "\n\n INPUT CONTEXT: " . $textPrompt]
-        ];
-
-        if ($imagePart) {
-            $parts[] = $imagePart;
-        }
-
+        // Groq / OpenAI Compatible Request
         $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $apiKey,
             'Content-Type' => 'application/json',
-        ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}", [
-            'contents' => [
-                ['parts' => $parts]
-            ]
+        ])->post("https://api.groq.com/openai/v1/chat/completions", [
+            'model' => 'llama-3.3-70b-versatile', // The Smart & Fast Model
+            'messages' => [
+                ['role' => 'system', 'content' => $systemInstruction],
+                ['role' => 'user', 'content' => "INPUT CONTEXT: " . $textPrompt]
+            ],
+            'temperature' => 0.7,
+            'response_format' => ['type' => 'json_object'] // Forces valid JSON
         ]);
+
+        if ($response->failed()) {
+            throw new \Exception("Groq API Error: " . $response->body());
+        }
 
         $responseData = $response->json();
 
-        if (isset($responseData['error'])) {
-             throw new \Exception("Gemini API Error: " . $responseData['error']['message']);
-        }
+        // FIX: Groq uses 'choices', not 'candidates'
+        $rawText = $responseData['choices'][0]['message']['content'] ?? '{}';
 
-        $rawText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
-
+        // Clean JSON just in case
         $cleanJson = str_replace(['```json', '```'], '', $rawText);
         
-        $startIndex = strpos($cleanJson, '{');
-        $endIndex = strrpos($cleanJson, '}');
-
-        if ($startIndex !== false && $endIndex !== false) {
-            $cleanJson = substr($cleanJson, $startIndex, ($endIndex - $startIndex) + 1);
-        }
-
         $jsonData = json_decode($cleanJson, true);
 
+        // Fallback if JSON is broken
         if (json_last_error() !== JSON_ERROR_NONE) {
             Log::error("JSON Decode Error: " . json_last_error_msg());
             Log::error("Raw AI Output: " . $rawText);
